@@ -6970,3 +6970,139 @@ fn test_clawback_integration_edge_behavior_boundaries() {
     assert_eq!(clawed_fully_claimed, 0);
     assert_eq!(token_client.balance(&compliance_admin), 500);
 }
+
+// =============================================================================
+// SSB-2026-187 - Claimable calculation workflow: before start, at end,
+// canceled-at-time, and rounding across repeated partial claims
+// =============================================================================
+
+#[test]
+fn test_claimable_calculation_failure_is_atomic_and_rounding_across_partial_claims() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+    let token_client = token::Client::new(&env, &token);
+
+    token_admin.mint(&sender, &200);
+
+    // 1. Stream 1: 100 tokens over 30s (t=100 to t=130) to exercise floor rounding
+    env.ledger().set_timestamp(50);
+    let stream_1 = client.create_stream(&sender, &recipient, &token, &100, &100, &130, &0, &None);
+    assert_eq!(token_client.balance(&sender), 100);
+    assert_eq!(token_client.balance(&contract_id), 100);
+
+    // 2. Before start (t=50 and t=99) and at exact start (t=100): claimable is 0
+    assert_eq!(client.claimable(&stream_1, &50), 0);
+    assert_eq!(client.claimable(&stream_1, &99), 0);
+    assert_eq!(client.claimable(&stream_1, &100), 0);
+
+    // Failed claim before start leaves storage and balances in a consistent, recoverable state
+    let events_before_start_fail = env.events().all().len();
+    assert!(client.try_claim(&stream_1, &recipient, &1).is_err());
+    assert!(client.try_claim(&stream_1, &recipient, &0).is_err());
+    assert_eq!(env.events().all().len(), events_before_start_fail);
+    assert_eq!(token_client.balance(&recipient), 0);
+    assert_eq!(token_client.balance(&contract_id), 100);
+    assert_eq!(client.get_stream(&stream_1).claimed_amount, 0);
+
+    // 3. Repeated partial claims with floor rounding before and after external token calls
+    // Step A: t=110 (elapsed=10/30 -> floor(1000/30) = 33 vested, 33 claimable)
+    env.ledger().set_timestamp(110);
+    assert_eq!(client.claimable(&stream_1, &110), 33);
+
+    // Pre-transfer over-claim by 1 unit (34 > 33) fails atomically
+    let events_before_step_a = env.events().all().len();
+    assert!(client.try_claim(&stream_1, &recipient, &34).is_err());
+    assert!(client.try_claim(&stream_1, &stranger, &33).is_err());
+    assert_eq!(env.events().all().len(), events_before_step_a);
+    assert_eq!(token_client.balance(&recipient), 0);
+    assert_eq!(token_client.balance(&contract_id), 100);
+    assert_eq!(client.get_stream(&stream_1).claimed_amount, 0);
+
+    // Partial claim of 20 (leaving 13 claimable at t=110)
+    assert_eq!(client.claim(&stream_1, &recipient, &20), 20);
+    assert_eq!(client.claimable(&stream_1, &110), 13);
+    assert_eq!(token_client.balance(&recipient), 20);
+    assert_eq!(token_client.balance(&contract_id), 80);
+
+    // Claim remaining 13 at t=110 (now 33 claimed, 0 claimable at t=110)
+    assert_eq!(client.claim(&stream_1, &recipient, &13), 13);
+    assert_eq!(client.claimable(&stream_1, &110), 0);
+    assert!(client.try_claim(&stream_1, &recipient, &1).is_err());
+    assert_eq!(token_client.balance(&recipient), 33);
+    assert_eq!(token_client.balance(&contract_id), 67);
+    assert_eq!(client.get_stream(&stream_1).claimed_amount, 33);
+
+    // Step B: t=120 (elapsed=20/30 -> floor(2000/30) = 66 cumulative vested, 66 - 33 = 33 claimable)
+    env.ledger().set_timestamp(120);
+    assert_eq!(client.claimable(&stream_1, &120), 33);
+    assert!(client.try_claim(&stream_1, &recipient, &34).is_err());
+    assert_eq!(client.claim(&stream_1, &recipient, &33), 33);
+    assert_eq!(client.claimable(&stream_1, &120), 0);
+    assert_eq!(token_client.balance(&recipient), 66);
+    assert_eq!(token_client.balance(&contract_id), 34);
+    assert_eq!(client.get_stream(&stream_1).claimed_amount, 66);
+
+    // Step C: At end (t=130) and after end (t=200): cumulative vested is 100, so 34 is claimable
+    // (recovering the 1 truncated unit so repeated partial claims sum to exact total_amount)
+    env.ledger().set_timestamp(130);
+    assert_eq!(client.claimable(&stream_1, &130), 34);
+    assert_eq!(client.claimable(&stream_1, &200), 34);
+    assert!(client.try_claim(&stream_1, &recipient, &35).is_err());
+    assert_eq!(client.claim(&stream_1, &recipient, &34), 34);
+    assert_eq!(client.claimable(&stream_1, &130), 0);
+    assert_eq!(client.claimable(&stream_1, &200), 0);
+    assert_eq!(token_client.balance(&recipient), 100);
+    assert_eq!(token_client.balance(&contract_id), 0);
+    assert_eq!(client.get_stream(&stream_1).claimed_amount, 100);
+
+    // 4. Stream 2: Canceled-at-time after partial claim with rounding (100 tokens over 30s, t=200..230)
+    env.ledger().set_timestamp(200);
+    let stream_2 = client.create_stream(&sender, &recipient, &token, &100, &200, &230, &0, &None);
+    assert_eq!(token_client.balance(&sender), 0);
+    assert_eq!(token_client.balance(&contract_id), 100);
+
+    // At t=210 (vested = 33), recipient claims partial 15 (18 remaining vested)
+    env.ledger().set_timestamp(210);
+    assert_eq!(client.claimable(&stream_2, &210), 33);
+    assert_eq!(client.claim(&stream_2, &recipient, &15), 15);
+    assert_eq!(client.claimable(&stream_2, &210), 18);
+
+    // At t=220 (vested = 66), sender cancels stream:
+    // sender refund = 100 - 66 = 34; recipient remaining claimable = 66 - 15 = 51
+    env.ledger().set_timestamp(220);
+    client.cancel(&stream_2, &sender);
+    let canceled_stream = client.get_stream(&stream_2);
+    assert!(canceled_stream.canceled);
+    assert_eq!(canceled_stream.end_time, 220);
+    assert_eq!(canceled_stream.total_amount, 66);
+    assert_eq!(canceled_stream.claimed_amount, 15);
+    assert_eq!(token_client.balance(&sender), 34);
+    assert_eq!(token_client.balance(&contract_id), 51);
+
+    // Claimable at cancel time (t=220) and after original end (t=300) is frozen at 51
+    assert_eq!(client.claimable(&stream_2, &220), 51);
+    assert_eq!(client.claimable(&stream_2, &300), 51);
+
+    // Over-claim on canceled stream fails atomically
+    env.ledger().set_timestamp(250);
+    assert!(client.try_claim(&stream_2, &recipient, &52).is_err());
+    assert_eq!(token_client.balance(&contract_id), 51);
+    assert_eq!(client.get_stream(&stream_2).claimed_amount, 15);
+
+    // Recipient claims remaining 51 across two partial claims (25 + 26)
+    assert_eq!(client.claim(&stream_2, &recipient, &25), 25);
+    assert_eq!(client.claimable(&stream_2, &250), 26);
+    assert_eq!(client.claim(&stream_2, &recipient, &26), 26);
+    assert_eq!(client.claimable(&stream_2, &250), 0);
+    assert_eq!(token_client.balance(&recipient), 166);
+    assert_eq!(token_client.balance(&sender), 34);
+    assert_eq!(token_client.balance(&contract_id), 0);
+}

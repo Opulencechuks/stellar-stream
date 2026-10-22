@@ -30,7 +30,6 @@ let indexerStartLedger: number | null = null;
 let isIndexing = false;
 let lastObservedLedger: number | null = null;
 let lastFailureKind: IndexerRpcFailureKind | null = null;
-let invalidStartLedgerConfigured = false;
 
 const INDEXER_CURSOR_TABLE = "indexer_cursor";
 const CHECKPOINT_ROW_ID = 1;
@@ -47,47 +46,6 @@ export type IndexerRpcFailureKind =
   | "disconnected"
   | "provider_error"
   | "unknown";
-
-export type IndexerBackfillStatusCode =
-  | 200
-  | 400
-  | 429
-  | 502
-  | 503;
-
-export type IndexerBackfillOutcome =
-  | "success"
-  | "transient_delay"
-  | "invalid_start_ledger"
-  | "unconfigured"
-  | "circuit_open"
-  | "rpc_error";
-
-export interface IndexerBackfillResult {
-  ok: boolean;
-  statusCode: IndexerBackfillStatusCode;
-  outcome: IndexerBackfillOutcome;
-  code:
-    | "OK"
-    | "NO_NEW_LEDGERS"
-    | "TRUNCATED_PAGE"
-    | "INVALID_START_LEDGER"
-    | "UNCONFIGURED"
-    | "CIRCUIT_OPEN"
-    | "RATE_LIMITED"
-    | "DISCONNECTED"
-    | "PROVIDER_ERROR"
-    | "RPC_ERROR";
-  startLedger: number;
-  latestLedger: number | null;
-  persistedCheckpointBefore: number;
-  persistedCheckpointAfter: number;
-  eventsIndexed: number;
-  pagesFetched: number;
-  truncated: boolean;
-  failureKind: IndexerRpcFailureKind | null;
-  detail: string;
-}
 
 function extractStatusCode(err: unknown): number | undefined {
   if (err && typeof err === "object") {
@@ -132,6 +90,10 @@ export function classifyRpcFailure(err: unknown): IndexerRpcFailureKind {
   if (
     statusCode === 503 ||
     statusCode === 504 ||
+    text.includes("503") ||
+    text.includes("504") ||
+    text.includes("service unavailable") ||
+    text.includes("gateway timeout") ||
     text.includes("econnrefused") ||
     text.includes("econnreset") ||
     text.includes("etimedout") ||
@@ -329,67 +291,6 @@ function saveCheckpoint(db: any, ledgerSequence: number): void {
   logger.debug({ ledgerSequence }, "checkpoint saved to database");
 }
 
-function readPersistedCheckpoint(db: any): number {
-  try {
-    const row = db
-      .prepare(`SELECT last_ledger_sequence FROM ${INDEXER_CURSOR_TABLE} WHERE id = @id`)
-      .get({ id: CHECKPOINT_ROW_ID }) as { last_ledger_sequence: number } | undefined;
-    return row && typeof row.last_ledger_sequence === "number" && row.last_ledger_sequence > 0
-      ? row.last_ledger_sequence
-      : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function parseStartLedgerInput(raw: unknown): { valid: true; value: number } | { valid: false } {
-  if (typeof raw === "number") {
-    if (Number.isInteger(raw) && raw >= 0 && Number.isSafeInteger(raw)) {
-      return { valid: true, value: raw };
-    }
-    return { valid: false };
-  }
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    if (!/^\d+$/.test(trimmed)) {
-      return { valid: false };
-    }
-    const parsed = Number(trimmed);
-    if (Number.isInteger(parsed) && parsed >= 0 && Number.isSafeInteger(parsed)) {
-      return { valid: true, value: parsed };
-    }
-  }
-  return { valid: false };
-}
-
-function mapFailureKindToStatusCode(kind: IndexerRpcFailureKind): IndexerBackfillStatusCode {
-  switch (kind) {
-    case "rate_limited":
-      return 429;
-    case "disconnected":
-      return 503;
-    case "provider_error":
-    case "unknown":
-    default:
-      return 502;
-  }
-}
-
-function mapFailureKindToCode(
-  kind: IndexerRpcFailureKind,
-): "RATE_LIMITED" | "DISCONNECTED" | "PROVIDER_ERROR" | "RPC_ERROR" {
-  switch (kind) {
-    case "rate_limited":
-      return "RATE_LIMITED";
-    case "disconnected":
-      return "DISCONNECTED";
-    case "provider_error":
-      return "PROVIDER_ERROR";
-    default:
-      return "RPC_ERROR";
-  }
-}
-
 export function initIndexer(
   rpcUrl: string,
   contractIdParam: string,
@@ -401,32 +302,28 @@ export function initIndexer(
     networkPassphrase = networkPass;
   }
 
-  indexerStartLedger = null;
-  invalidStartLedgerConfigured = false;
-
   const startLedgerEnv = process.env.INDEXER_START_LEDGER;
-  if (startLedgerEnv !== undefined && startLedgerEnv.trim() !== "") {
-    const parsed = parseStartLedgerInput(startLedgerEnv);
-    if (parsed.valid) {
-      indexerStartLedger = parsed.value;
-      if (parsed.value !== 0) {
-        logger.warn({ startLedger: parsed.value }, "INDEXER_START_LEDGER override active");
+  if (startLedgerEnv !== undefined) {
+    const startLedger = parseInt(startLedgerEnv, 10);
+    if (!isNaN(startLedger)) {
+      indexerStartLedger = startLedger;
+      if (startLedger !== 0) {
+        logger.warn({ startLedger }, "INDEXER_START_LEDGER override active");
       }
     } else {
-      invalidStartLedgerConfigured = true;
       logger.error({ value: startLedgerEnv }, "invalid INDEXER_START_LEDGER value");
     }
+  } else {
+    indexerStartLedger = null;
   }
 
   const db = getDb();
   ensureIndexerCursorTable(db);
   loadCheckpoint(db);
 
-  if (indexerStartLedger !== null && indexerStartLedger > lastProcessedLedger) {
-    // Apply start ledger override in memory for the first backfill poll only;
-    // do not write to indexer_cursor until the backfill scan completes cleanly.
-    lastProcessedLedger = indexerStartLedger;
-    logger.info({ lastProcessedLedger }, "applied INDEXER_START_LEDGER override to checkpoint");
+  if (indexerStartLedger !== null && indexerStartLedger > 0) {
+    lastProcessedLedger = Math.max(0, indexerStartLedger - 1);
+    logger.info({ lastProcessedLedger: indexerStartLedger }, "applied INDEXER_START_LEDGER override to checkpoint");
   }
 
   lastIndexedLedger.set(lastProcessedLedger);
@@ -487,246 +384,58 @@ export function resetIndexerState(): void {
   lastProcessedLedger = 0;
   indexerInterval = null;
   indexerStartLedger = null;
-  invalidStartLedgerConfigured = false;
   lastObservedLedger = null;
   lastFailureKind = null;
-  isIndexing = false;
   circuitBreaker.reset();
 }
 
-interface ScanBatchSummary {
-  eventsIndexed: number;
-  pagesFetched: number;
-  truncated: boolean;
-  checkpoint: number;
-}
-
-/**
- * Executes one explicit indexer backfill / poll cycle from the configured start
- * ledger or persisted checkpoint and returns a deterministic status code and
- * structured outcome without silently mutating the persisted checkpoint on
- * boundary inputs, truncated pages, or RPC errors.
- */
-export async function runIndexerBackfill(options?: {
-  startLedger?: number | string;
-}): Promise<IndexerBackfillResult> {
-  let db: any = null;
-  try {
-    db = getDb();
-  } catch {
-    db = null;
+async function indexEvents(): Promise<void> {
+  if (!rpcServer || !contractId) {
+    return;
   }
 
-  const persistedBefore = db ? readPersistedCheckpoint(db) : lastProcessedLedger;
-
-  // 1. Validate explicit or environment-configured startLedger boundary inputs
-  let effectiveBaseLedger = lastProcessedLedger;
-  if (options?.startLedger !== undefined) {
-    const parsed = parseStartLedgerInput(options.startLedger);
-    if (!parsed.valid) {
-      return {
-        ok: false,
-        statusCode: 400,
-        outcome: "invalid_start_ledger",
-        code: "INVALID_START_LEDGER",
-        startLedger: persistedBefore + 1,
-        latestLedger: lastObservedLedger,
-        persistedCheckpointBefore: persistedBefore,
-        persistedCheckpointAfter: persistedBefore,
-        eventsIndexed: 0,
-        pagesFetched: 0,
-        truncated: false,
-        failureKind: null,
-        detail: "startLedger must be a non-negative safe integer; persisted checkpoint was not modified.",
-      };
-    }
-    effectiveBaseLedger = parsed.value;
-  } else if (invalidStartLedgerConfigured) {
-    return {
-      ok: false,
-      statusCode: 400,
-      outcome: "invalid_start_ledger",
-      code: "INVALID_START_LEDGER",
-      startLedger: persistedBefore + 1,
-      latestLedger: lastObservedLedger,
-      persistedCheckpointBefore: persistedBefore,
-      persistedCheckpointAfter: persistedBefore,
-      eventsIndexed: 0,
-      pagesFetched: 0,
-      truncated: false,
-      failureKind: null,
-      detail: "Configured INDEXER_START_LEDGER is invalid; persisted checkpoint was not modified.",
-    };
-  }
-
-  const targetStartLedger = effectiveBaseLedger + 1;
-
-  if (!rpcServer || !contractId || !db) {
-    return {
-      ok: false,
-      statusCode: 503,
-      outcome: "unconfigured",
-      code: "UNCONFIGURED",
-      startLedger: targetStartLedger,
-      latestLedger: lastObservedLedger,
-      persistedCheckpointBefore: persistedBefore,
-      persistedCheckpointAfter: persistedBefore,
-      eventsIndexed: 0,
-      pagesFetched: 0,
-      truncated: false,
-      failureKind: null,
-      detail: "Indexer RPC server or contract ID is not configured; persisted checkpoint was not modified.",
-    };
+  if (isIndexing) {
+    return;
   }
 
   const state = circuitBreaker.getState();
   if (state === CircuitState.OPEN) {
-    return {
-      ok: false,
-      statusCode: 503,
-      outcome: "circuit_open",
-      code: "CIRCUIT_OPEN",
-      startLedger: targetStartLedger,
-      latestLedger: lastObservedLedger,
-      persistedCheckpointBefore: persistedBefore,
-      persistedCheckpointAfter: persistedBefore,
-      eventsIndexed: 0,
-      pagesFetched: 0,
-      truncated: false,
-      failureKind: lastFailureKind,
-      detail: "Circuit breaker is OPEN; skipping backfill poll and preserving persisted checkpoint.",
-    };
-  }
-
-  if (isIndexing) {
-    return {
-      ok: true,
-      statusCode: 200,
-      outcome: "transient_delay",
-      code: "NO_NEW_LEDGERS",
-      startLedger: targetStartLedger,
-      latestLedger: lastObservedLedger,
-      persistedCheckpointBefore: persistedBefore,
-      persistedCheckpointAfter: persistedBefore,
-      eventsIndexed: 0,
-      pagesFetched: 0,
-      truncated: false,
-      failureKind: null,
-      detail: "An indexer poll is already in flight; persisted checkpoint remains unchanged.",
-    };
+    return;
   }
 
   isIndexing = true;
-  const previousProcessedLedger = lastProcessedLedger;
-  lastProcessedLedger = effectiveBaseLedger;
 
   try {
+    const db = getDb();
     const latestLedger = await rpcServer.getLatestLedger();
     const currentLedger = latestLedger.sequence;
     lastObservedLedger = currentLedger;
     indexerLatestLedger.set(currentLedger);
     indexerLedgerLag.set(Math.max(0, currentLedger - lastProcessedLedger));
 
-    // Boundary case: configured startLedger (or current checkpoint) is at or ahead of RPC head
     if (currentLedger <= lastProcessedLedger) {
-      // Restore in-memory checkpoint to persisted state if an override was beyond chain head
-      lastProcessedLedger = persistedBefore > 0 ? persistedBefore : previousProcessedLedger;
-      lastIndexedLedger.set(lastProcessedLedger);
       recordPollSuccess();
-      return {
-        ok: true,
-        statusCode: 200,
-        outcome: "success",
-        code: "NO_NEW_LEDGERS",
-        startLedger: targetStartLedger,
-        latestLedger: currentLedger,
-        persistedCheckpointBefore: persistedBefore,
-        persistedCheckpointAfter: readPersistedCheckpoint(db),
-        eventsIndexed: 0,
-        pagesFetched: 0,
-        truncated: false,
-        failureKind: null,
-        detail: `RPC head (${currentLedger}) has not advanced past configured base ledger (${effectiveBaseLedger}); persisted checkpoint (${persistedBefore}) was not modified.`,
-      };
+      return;
     }
 
-    const summary = isFallbackPollingEnabled()
-      ? await indexEventsWithFallback(db, currentLedger)
-      : await indexEventsWithCursorPagination(db, currentLedger);
+    if (isFallbackPollingEnabled()) {
+      await indexEventsWithFallback(db, currentLedger);
+    } else {
+      await indexEventsWithCursorPagination(db, currentLedger);
+    }
 
     recordPollSuccess();
-
-    const persistedAfter = readPersistedCheckpoint(db);
-    if (summary.truncated) {
-      return {
-        ok: true,
-        statusCode: 200,
-        outcome: "transient_delay",
-        code: "TRUNCATED_PAGE",
-        startLedger: targetStartLedger,
-        latestLedger: currentLedger,
-        persistedCheckpointBefore: persistedBefore,
-        persistedCheckpointAfter: persistedAfter,
-        eventsIndexed: summary.eventsIndexed,
-        pagesFetched: summary.pagesFetched,
-        truncated: true,
-        failureKind: null,
-        detail: `RPC truncated or delayed pagination after ${summary.pagesFetched} page(s); persisted checkpoint held at ${persistedAfter} until remaining ledgers up to ${currentLedger} are confirmed.`,
-      };
-    }
-
-    return {
-      ok: true,
-      statusCode: 200,
-      outcome: "success",
-      code: "OK",
-      startLedger: targetStartLedger,
-      latestLedger: currentLedger,
-      persistedCheckpointBefore: persistedBefore,
-      persistedCheckpointAfter: persistedAfter,
-      eventsIndexed: summary.eventsIndexed,
-      pagesFetched: summary.pagesFetched,
-      truncated: false,
-      failureKind: null,
-      detail: `Backfill completed from ledger ${targetStartLedger} to ${persistedAfter} (${summary.eventsIndexed} event(s) across ${summary.pagesFetched} page(s)).`,
-    };
   } catch (err) {
-    // Restore in-memory checkpoint so a failed override or first-page RPC error
-    // never silently advances or corrupts the checkpoint.
-    lastProcessedLedger = persistedBefore;
-    lastIndexedLedger.set(lastProcessedLedger);
     circuitBreaker.onFailure();
-    const kind = classifyRpcFailure(err);
-    lastFailureKind = kind;
+    lastFailureKind = classifyRpcFailure(err);
     indexerErrorsTotal.inc();
     logger.error({ err }, "failed to index events");
-
-    const persistedAfter = readPersistedCheckpoint(db);
-    return {
-      ok: false,
-      statusCode: mapFailureKindToStatusCode(kind),
-      outcome: "rpc_error",
-      code: mapFailureKindToCode(kind),
-      startLedger: targetStartLedger,
-      latestLedger: lastObservedLedger,
-      persistedCheckpointBefore: persistedBefore,
-      persistedCheckpointAfter: persistedAfter,
-      eventsIndexed: 0,
-      pagesFetched: 0,
-      truncated: false,
-      failureKind: kind,
-      detail: `Backfill RPC request failed (${kind}); persisted checkpoint (${persistedAfter}) was not modified.`,
-    };
   } finally {
     isIndexing = false;
   }
 }
 
-async function indexEvents(): Promise<void> {
-  await runIndexerBackfill();
-}
-
-async function indexEventsWithFallback(db: any, currentLedger: number): Promise<ScanBatchSummary> {
+async function indexEventsWithFallback(db: any, currentLedger: number): Promise<void> {
   const startLedger = lastProcessedLedger + 1;
   let events;
 
@@ -746,67 +455,29 @@ async function indexEventsWithFallback(db: any, currentLedger: number): Promise<
   }
 
   const startLedgerForMetrics = lastProcessedLedger;
-  const eventList = events.events ?? [];
-  const eventCount = eventList.length;
-  let maxLedgerSeen = lastProcessedLedger;
+  const eventCount = events.events?.length ?? 0;
 
   if (eventCount > 0) {
     db.transaction(() => {
-      for (const event of eventList) {
+      for (const event of events.events || []) {
         processEvent(db, event);
         eventsIndexedTotal.inc();
-        if (typeof event.ledger === "number" && event.ledger > maxLedgerSeen) {
-          maxLedgerSeen = event.ledger;
-        }
       }
     })();
   }
 
-  // Detect truncated or delayed response in fallback mode:
-  // 1) RPC returned a non-empty cursor alongside an empty first page, or
-  // 2) RPC returned a continuation cursor indicating more events exist beyond this page.
-  const hasMoreCursor = Boolean(events.cursor);
-  if (hasMoreCursor && (eventCount === 0 || maxLedgerSeen < currentLedger)) {
-    const persistedCheckpoint = readPersistedCheckpoint(db);
-    lastProcessedLedger = persistedCheckpoint;
-    lastIndexedLedger.set(lastProcessedLedger);
-    indexerLedgerLag.set(Math.max(0, currentLedger - lastProcessedLedger));
-    logger.warn(
-      { startLedger, currentLedger, eventCount },
-      "RPC delayed or truncated page in fallback mode; preserving persisted checkpoint",
-    );
-    return {
-      eventsIndexed: eventCount,
-      pagesFetched: 1,
-      truncated: true,
-      checkpoint: persistedCheckpoint,
-    };
-  }
-
-  const checkpoint = Math.max(currentLedger, maxLedgerSeen);
-  saveCheckpoint(db, checkpoint);
-  lastProcessedLedger = checkpoint;
+  saveCheckpoint(db, currentLedger);
+  lastProcessedLedger = currentLedger;
   lastIndexedLedger.set(lastProcessedLedger);
   indexerLedgerLag.set(Math.max(0, currentLedger - lastProcessedLedger));
   ledgersScannedTotal.inc(lastProcessedLedger - startLedgerForMetrics);
-
-  return {
-    eventsIndexed: eventCount,
-    pagesFetched: 1,
-    truncated: false,
-    checkpoint,
-  };
 }
 
-async function indexEventsWithCursorPagination(db: any, currentLedger: number): Promise<ScanBatchSummary> {
+async function indexEventsWithCursorPagination(db: any, currentLedger: number): Promise<void> {
   const startLedger = lastProcessedLedger + 1;
   let cursor: string | undefined;
   let maxLedgerSeen = lastProcessedLedger;
   const startLedgerForMetrics = lastProcessedLedger;
-  let pagesFetched = 0;
-  let eventsIndexed = 0;
-  let truncated = false;
-  const seenCursors = new Set<string>();
 
   while (true) {
     let request: rpc.Api.GetEventsRequest;
@@ -842,21 +513,9 @@ async function indexEventsWithCursorPagination(db: any, currentLedger: number): 
       throw err;
     }
 
-    pagesFetched += 1;
     const events = eventsResponse.events ?? [];
-    const nextCursor = eventsResponse.cursor;
 
     if (events.length === 0) {
-      // If the RPC returns an empty page (especially on the first page at startLedger)
-      // *with* a continuation cursor, or repeats the same cursor, the RPC page was
-      // truncated or delayed before reaching currentLedger.
-      if (nextCursor && (pagesFetched === 1 || nextCursor === cursor || seenCursors.has(nextCursor))) {
-        truncated = true;
-        logger.warn(
-          { startLedger, currentLedger, pagesFetched },
-          "RPC returned truncated or delayed empty page with continuation cursor; holding checkpoint",
-        );
-      }
       break;
     }
 
@@ -864,7 +523,6 @@ async function indexEventsWithCursorPagination(db: any, currentLedger: number): 
       for (const event of events) {
         processEvent(db, event);
         eventsIndexedTotal.inc();
-        eventsIndexed += 1;
 
         if (event.ledger > maxLedgerSeen) {
           maxLedgerSeen = event.ledger;
@@ -872,38 +530,11 @@ async function indexEventsWithCursorPagination(db: any, currentLedger: number): 
       }
     })();
 
-    if (!nextCursor) {
+    cursor = eventsResponse.cursor;
+
+    if (!cursor) {
       break;
     }
-
-    // Guard against stalled / repeating cursor truncation from RPC
-    if (nextCursor === cursor || seenCursors.has(nextCursor)) {
-      truncated = true;
-      logger.warn(
-        { startLedger, currentLedger, pagesFetched },
-        "RPC returned repeating cursor during pagination; treating page as truncated",
-      );
-      break;
-    }
-
-    seenCursors.add(nextCursor);
-    cursor = nextCursor;
-  }
-
-  if (truncated) {
-    // Do not silently change the persisted backfill checkpoint when RPC
-    // truncates or delays a page; hold the checkpoint until a complete scan
-    // reaches the target ledger.
-    const persistedCheckpoint = readPersistedCheckpoint(db);
-    lastProcessedLedger = persistedCheckpoint;
-    lastIndexedLedger.set(lastProcessedLedger);
-    indexerLedgerLag.set(Math.max(0, currentLedger - lastProcessedLedger));
-    return {
-      eventsIndexed,
-      pagesFetched,
-      truncated: true,
-      checkpoint: persistedCheckpoint,
-    };
   }
 
   const checkpoint = Math.max(currentLedger, maxLedgerSeen);
@@ -912,13 +543,6 @@ async function indexEventsWithCursorPagination(db: any, currentLedger: number): 
   lastIndexedLedger.set(lastProcessedLedger);
   indexerLedgerLag.set(Math.max(0, currentLedger - lastProcessedLedger));
   ledgersScannedTotal.inc(lastProcessedLedger - startLedgerForMetrics);
-
-  return {
-    eventsIndexed,
-    pagesFetched,
-    truncated: false,
-    checkpoint,
-  };
 }
 
 function processEvent(db: any, event: rpc.Api.EventResponse): void {
@@ -927,6 +551,7 @@ function processEvent(db: any, event: rpc.Api.EventResponse): void {
     const value = scValToNative(event.value);
 
     if (topic.length < 2) return;
+    if (topic[0] !== "Stream") return;
 
     const eventName = topic[1];
     const timestamp = Math.floor(new Date(event.ledgerClosedAt).getTime() / 1000);

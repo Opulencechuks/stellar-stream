@@ -84,7 +84,7 @@ export function getStreamHistory(streamId: string, limit = 20, offset = 0, order
   const orderClause = order === 'asc' ? 'ASC' : 'DESC';
   const rows = db
     .prepare(
-      `SELECT * FROM stream_events WHERE stream_id = ? ORDER BY timestamp ${orderClause}, id ${orderClause} LIMIT ? OFFSET ?`,
+      `SELECT * FROM stream_events WHERE stream_id = ? ORDER BY timestamp ${orderClause}, CASE WHEN event_type = 'created' THEN 0 ELSE 1 END ${orderClause}, id ${orderClause} LIMIT ? OFFSET ?`,
     )
     .all(streamId, limit, offset) as EventRow[];
   return rows.map(rowToEvent);

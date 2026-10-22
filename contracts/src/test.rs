@@ -4637,7 +4637,8 @@ fn test_persistent_stream_unauthorized_claim_fails_before_state_change() {
             .persistent()
             .extend_ttl(&DataKey::Stream(stream_id), 1, 100);
     });
-    env.ledger().set_sequence_number(env.ledger().sequence() + 99);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 99);
     env.ledger().set_timestamp(100);
 
     let res = client.try_claim(&stream_id, &impostor, &1000);
@@ -4664,7 +4665,8 @@ fn test_persistent_stream_atomic_failure_on_over_claim() {
             .persistent()
             .extend_ttl(&DataKey::Stream(stream_id), 1, 100);
     });
-    env.ledger().set_sequence_number(env.ledger().sequence() + 99);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 99);
     env.ledger().set_timestamp(50);
 
     let res = client.try_claim(&stream_id, &recipient, &800);
@@ -4672,7 +4674,6 @@ fn test_persistent_stream_atomic_failure_on_over_claim() {
     assert_eq!(token::Client::new(&env, &token).balance(&recipient), 0);
     assert_eq!(client.get_stream(&stream_id).claimed_amount, 0);
 }
-
 
 // =============================================================================
 // #1183 — Soroban regression: contract upgrade compatibility
@@ -5110,7 +5111,6 @@ fn test_upgrade_compat_b_upgraded_code_auth_and_rollback() {
     assert_eq!(f.contract_event_count(), before + 1);
 }
 
-
 // =============================================================================
 // #1173 — Soroban regression: Stream ID allocation
 // =============================================================================
@@ -5156,7 +5156,8 @@ fn test_stream_id_allocation_aborted_creation_does_not_consume_id() {
     token_admin.mint(&sender, &1000);
 
     // Aborted creation: end_time <= start_time
-    let fail_res = client.try_create_stream(&sender, &recipient, &token, &500, &100, &50, &0, &None);
+    let fail_res =
+        client.try_create_stream(&sender, &recipient, &token, &500, &100, &50, &0, &None);
     assert!(fail_res.is_err());
 
     // Subsequent valid creation receives the unconsumed ID 1
@@ -5164,7 +5165,6 @@ fn test_stream_id_allocation_aborted_creation_does_not_consume_id() {
     assert_eq!(id, 1);
     assert_eq!(client.get_stream(&id).total_amount, 500);
 }
-
 
 // =============================================================================
 // #1172 — Align events with Stream ID allocation state
@@ -5196,10 +5196,10 @@ fn test_stream_id_allocation_event_alignment_and_ordering() {
     assert_eq!(stream.total_amount, 1000);
 
     // Failed creation attempt emits no ghost stream
-    let fail_res = client.try_create_stream(&sender, &recipient, &token, &500, &100, &50, &0, &None);
+    let fail_res =
+        client.try_create_stream(&sender, &recipient, &token, &500, &100, &50, &0, &None);
     assert!(fail_res.is_err());
 }
-
 
 // =============================================================================
 // #1171 — Check authority in Stream ID allocation
@@ -5225,7 +5225,8 @@ fn test_stream_id_allocation_unauthorized_sender_fails_before_id_allocation() {
 
     // Disable mocked auth to enforce authority
     env.mock_auths(&[]);
-    let unauth_res = client.try_create_stream(&sender, &recipient, &token, &500, &0, &100, &0, &None);
+    let unauth_res =
+        client.try_create_stream(&sender, &recipient, &token, &500, &0, &100, &0, &None);
     assert!(unauth_res.is_err());
 
     // Balance remains 500 (not drained by unauthorized call)
@@ -5236,7 +5237,6 @@ fn test_stream_id_allocation_unauthorized_sender_fails_before_id_allocation() {
     let id2 = client.create_stream(&sender, &recipient, &token, &500, &0, &100, &0, &None);
     assert_eq!(id2, 2);
 }
-
 
 // =============================================================================
 // #1170 — Make failure atomic in Stream ID allocation
@@ -5267,7 +5267,6 @@ fn test_stream_id_allocation_atomic_failure_rollback() {
     assert_eq!(client.get_stream(&id).total_amount, 1000);
     assert_eq!(token::Client::new(&env, &token).balance(&sender), 0);
 }
-
 
 // =============================================================================
 // #1169 — Specify edge behavior for Stream ID allocation
@@ -5301,7 +5300,6 @@ fn test_stream_id_allocation_edge_amounts_and_checked_arithmetic() {
     assert_eq!(id2, 2);
     assert_eq!(client.get_stream(&id2).total_amount, 999);
 }
-
 
 // =============================================================================
 // #1168 - Add Soroban regression for Asset contract handling
@@ -5344,7 +5342,16 @@ fn test_asset_contract_handling_two_assets_and_unsupported_asset() {
 
     // 1. Two assets: create concurrent streams with different amounts & parameters
     let id_a = client.create_stream(&sender, &recipient_a, &asset_a, &1_000, &0, &100, &0, &None);
-    let id_b = client.create_stream(&sender, &recipient_b, &asset_b, &20_000, &0, &200, &0, &None);
+    let id_b = client.create_stream(
+        &sender,
+        &recipient_b,
+        &asset_b,
+        &20_000,
+        &0,
+        &200,
+        &0,
+        &None,
+    );
 
     assert_eq!(id_a, 1);
     assert_eq!(id_b, 2);
@@ -5378,7 +5385,6 @@ fn test_asset_contract_handling_two_assets_and_unsupported_asset() {
     assert_eq!(client_unsupported.balance(&sender), 5_000);
     assert_eq!(client_unsupported.balance(&contract_id), 0);
 }
-
 
 // =============================================================================
 // #1167 - Align events with Asset contract handling state
@@ -5423,13 +5429,31 @@ fn test_asset_contract_handling_events_aligned_with_state() {
     assert_eq!(events_after_a.len(), events_count_init + 2);
 
     // 2. Create stream with Asset B (emits token transfer event + StreamCreated event)
-    let id_b = client.create_stream(&sender, &recipient_b, &asset_b, &12_000, &0, &200, &0, &None);
+    let id_b = client.create_stream(
+        &sender,
+        &recipient_b,
+        &asset_b,
+        &12_000,
+        &0,
+        &200,
+        &0,
+        &None,
+    );
     assert_eq!(id_b, 2);
     let events_after_b = env.events().all();
     assert_eq!(events_after_b.len(), events_count_init + 4);
 
     // 3. Failed attempt with unsupported asset produces NO new events (atomic rollback)
-    let failed_res = client.try_create_stream(&sender, &recipient_a, &unsupported_asset, &1_000, &0, &100, &0, &None);
+    let failed_res = client.try_create_stream(
+        &sender,
+        &recipient_a,
+        &unsupported_asset,
+        &1_000,
+        &0,
+        &100,
+        &0,
+        &None,
+    );
     assert!(failed_res.is_err());
     assert_eq!(env.events().all().len(), events_count_init + 4);
 
@@ -5442,7 +5466,6 @@ fn test_asset_contract_handling_events_aligned_with_state() {
     assert_eq!(stream_b.token, asset_b);
     assert_eq!(stream_b.total_amount, 12_000);
 }
-
 
 // =============================================================================
 // #1166 - Check authority in Asset contract handling
@@ -5484,7 +5507,8 @@ fn test_asset_contract_handling_authority_check_across_assets() {
 
     // 2. Unauthorized call for asset B without sender auth fails
     env.mock_auths(&[]);
-    let unauth_res = client.try_create_stream(&sender, &recipient_b, &asset_b, &8_000, &0, &100, &0, &None);
+    let unauth_res =
+        client.try_create_stream(&sender, &recipient_b, &asset_b, &8_000, &0, &100, &0, &None);
     assert!(unauth_res.is_err());
 
     // 3. Asset B balance and contract state remain completely unchanged
@@ -5498,7 +5522,6 @@ fn test_asset_contract_handling_authority_check_across_assets() {
     assert_eq!(client_b.balance(&sender), 12_000);
     assert_eq!(client_b.balance(&contract_id), 8_000);
 }
-
 
 // =============================================================================
 // #1165 - Make failure atomic in Asset contract handling
@@ -5568,7 +5591,6 @@ fn test_asset_contract_handling_atomic_failure_rollback() {
     assert_eq!(client_allowed.balance(&contract_id), 2_000);
 }
 
-
 // =============================================================================
 // #1164 - Specify edge behavior for Asset contract handling
 // =============================================================================
@@ -5603,24 +5625,63 @@ fn test_asset_contract_handling_edge_precision_and_amounts() {
     );
 
     // 1. Boundary 1: Smallest integer unit (1) on asset_micro
-    let id_micro = client.create_stream(&sender, &recipient_micro, &asset_micro, &1, &0, &100, &0, &None);
+    let id_micro = client.create_stream(
+        &sender,
+        &recipient_micro,
+        &asset_micro,
+        &1,
+        &0,
+        &100,
+        &0,
+        &None,
+    );
     assert_eq!(id_micro, 1);
     assert_eq!(client.get_stream(&id_micro).total_amount, 1);
     assert_eq!(client_micro.balance(&sender), 9);
     assert_eq!(client_micro.balance(&contract_id), 1);
 
     // 2. Boundary 2: Zero or negative amount rejected for both assets
-    assert!(client.try_create_stream(&sender, &recipient_micro, &asset_micro, &0, &0, &100, &0, &None).is_err());
-    assert!(client.try_create_stream(&sender, &recipient_macro, &asset_macro, &-100, &0, &100, &0, &None).is_err());
+    assert!(client
+        .try_create_stream(
+            &sender,
+            &recipient_micro,
+            &asset_micro,
+            &0,
+            &0,
+            &100,
+            &0,
+            &None
+        )
+        .is_err());
+    assert!(client
+        .try_create_stream(
+            &sender,
+            &recipient_macro,
+            &asset_macro,
+            &-100,
+            &0,
+            &100,
+            &0,
+            &None
+        )
+        .is_err());
 
     // 3. Boundary 3: Large integer scale on asset_macro with checked arithmetic
-    let id_macro = client.create_stream(&sender, &recipient_macro, &asset_macro, &500_000_000, &0, &500, &0, &None);
+    let id_macro = client.create_stream(
+        &sender,
+        &recipient_macro,
+        &asset_macro,
+        &500_000_000,
+        &0,
+        &500,
+        &0,
+        &None,
+    );
     assert_eq!(id_macro, 2);
     assert_eq!(client.get_stream(&id_macro).total_amount, 500_000_000);
     assert_eq!(client_macro.balance(&sender), 500_000_000);
     assert_eq!(client_macro.balance(&contract_id), 500_000_000);
 }
-
 
 // =============================================================================
 // #1163 - Add Soroban regression for Contract event order
@@ -5675,7 +5736,6 @@ fn test_contract_event_order_create_claim_cancel_lifecycle() {
     assert_eq!(env.events().all().len(), events_after_cancel);
 }
 
-
 // =============================================================================
 // #1162 - Align events with Contract event order state
 // =============================================================================
@@ -5696,7 +5756,8 @@ fn test_contract_event_order_events_aligned_with_state() {
 
     // 1. Create stream at t=100
     env.ledger().set_timestamp(100);
-    let stream_id = client.create_stream(&sender, &recipient, &token, &2_000, &100, &200, &0, &None);
+    let stream_id =
+        client.create_stream(&sender, &recipient, &token, &2_000, &100, &200, &0, &None);
     assert_eq!(stream_id, 1);
 
     // Reconstruct and verify stream state matches event expectations
@@ -5731,7 +5792,6 @@ fn test_contract_event_order_events_aligned_with_state() {
     assert!(fail_claim.is_err());
     assert_eq!(env.events().all().len(), events_count_after_cancel);
 }
-
 
 // =============================================================================
 // #1161 - Check authority in Contract event order
@@ -5790,7 +5850,6 @@ fn test_contract_event_order_authority_checks() {
     assert_eq!(token_client.balance(&contract_id), 0);
 }
 
-
 // =============================================================================
 // #1160 - Make failure atomic in Contract event order
 // =============================================================================
@@ -5813,7 +5872,8 @@ fn test_contract_event_order_atomic_failure_rollback() {
 
     // Create stream for 1000 tokens from t=100 to t=200
     env.ledger().set_timestamp(100);
-    let stream_id = client.create_stream(&sender, &recipient, &token, &1_000, &100, &200, &0, &None);
+    let stream_id =
+        client.create_stream(&sender, &recipient, &token, &1_000, &100, &200, &0, &None);
     assert_eq!(stream_id, 1);
 
     // Advance to t=150 (500 claimable)
@@ -5850,7 +5910,6 @@ fn test_contract_event_order_atomic_failure_rollback() {
     assert_eq!(token_client.balance(&contract_id), 100);
     assert_eq!(client.get_stream(&stream_id).canceled, true);
 }
-
 
 // =============================================================================
 // #1159 - Specify edge behavior for Contract event order
@@ -5894,7 +5953,6 @@ fn test_contract_event_order_edge_amounts_and_zero_boundary() {
     assert_eq!(token_client.balance(&contract_id), 0);
     assert_eq!(client.get_stream(&stream_id).canceled, true);
 }
-
 
 // =============================================================================
 // #1158 - Add Soroban regression for Sender authorization
@@ -5947,7 +6005,6 @@ fn test_sender_authorization_cancel_by_unrelated_address_and_replayed_cancellati
     assert_eq!(env.events().all().len(), events_after_cancel);
 }
 
-
 // =============================================================================
 // #1157 - Align events with Sender authorization state
 // =============================================================================
@@ -5993,7 +6050,6 @@ fn test_sender_authorization_events_aligned_with_cancellation_state() {
     assert_eq!(env.events().all().len(), events_count_after_create + 2);
 }
 
-
 // =============================================================================
 // #1156 - Check authority in Sender authorization
 // =============================================================================
@@ -6038,7 +6094,6 @@ fn test_sender_authorization_check_authority() {
     assert_eq!(token_client.balance(&sender), 1_000);
     assert_eq!(token_client.balance(&contract_id), 0);
 }
-
 
 // =============================================================================
 // #1155 - Make failure atomic in Sender authorization
@@ -6093,7 +6148,6 @@ fn test_sender_authorization_atomic_failure_rollback() {
     assert_eq!(token_client.balance(&contract_id), 0);
 }
 
-
 // =============================================================================
 // #1154 - Specify edge behavior for Sender authorization
 // =============================================================================
@@ -6137,7 +6191,6 @@ fn test_sender_authorization_edge_amounts_and_boundary_cancellation() {
     assert_eq!(token_client.balance(&contract_id), 0);
 }
 
-
 // =============================================================================
 // #1153 - Add Soroban regression for Recipient authorization
 // =============================================================================
@@ -6160,7 +6213,8 @@ fn test_recipient_authorization_different_recipient_and_auth_changes() {
 
     // 1. Create stream from t=0 to t=100 designated for recipient_a
     env.ledger().set_timestamp(0);
-    let stream_id = client.create_stream(&sender, &recipient_a, &token, &1_000, &0, &100, &0, &None);
+    let stream_id =
+        client.create_stream(&sender, &recipient_a, &token, &1_000, &0, &100, &0, &None);
     assert_eq!(stream_id, 1);
     assert_eq!(token_client.balance(&contract_id), 1_000);
 
@@ -6190,7 +6244,6 @@ fn test_recipient_authorization_different_recipient_and_auth_changes() {
     assert_eq!(token_client.balance(&contract_id), 800);
     assert_eq!(client.get_stream(&stream_id).claimed_amount, 200);
 }
-
 
 // =============================================================================
 // #1152 - Align events with Recipient authorization state
@@ -6245,7 +6298,6 @@ fn test_recipient_authorization_events_aligned_with_claim_state() {
     assert_eq!(env.events().all().len(), events_after_done);
 }
 
-
 // =============================================================================
 // #1151 - Check authority in Recipient authorization
 // =============================================================================
@@ -6297,7 +6349,6 @@ fn test_recipient_authorization_check_signer_authority() {
     assert_eq!(client.get_stream(&stream_id).claimed_amount, 250);
 }
 
-
 // =============================================================================
 // #1150 - Make failure atomic in Recipient authorization
 // =============================================================================
@@ -6340,7 +6391,6 @@ fn test_recipient_authorization_atomic_failure_rollback() {
     assert_eq!(token_client.balance(&contract_id), 500);
     assert_eq!(client.get_stream(&stream_id).claimed_amount, 500);
 }
-
 
 // =============================================================================
 // #1149 - Specify edge behavior for Recipient authorization
@@ -6385,7 +6435,6 @@ fn test_recipient_authorization_edge_amounts_and_different_recipient_boundary() 
     assert_eq!(token_client.balance(&contract_id), 0);
     assert_eq!(client.get_stream(&stream_id).claimed_amount, 1);
 }
-
 
 // =============================================================================
 // #1148 - Add Soroban regression for Cancellation refund
@@ -6437,7 +6486,6 @@ fn test_cancellation_refund_before_start_and_near_end_boundaries() {
     assert_eq!(token_client.balance(&recipient_2), 900);
     assert_eq!(token_client.balance(&contract_id), 0);
 }
-
 
 // =============================================================================
 // #1147 - Align events with Cancellation refund state
@@ -6553,7 +6601,8 @@ fn test_cancellation_refund_failure_is_atomic() {
 
     // 1. Create stream: 1000 tokens from t=100 to t=200
     env.ledger().set_timestamp(100);
-    let stream_id = client.create_stream(&sender, &recipient, &token, &1_000, &100, &200, &0, &None);
+    let stream_id =
+        client.create_stream(&sender, &recipient, &token, &1_000, &100, &200, &0, &None);
     assert_eq!(token_client.balance(&contract_id), 1_000);
 
     // 2. Advance to t=150
@@ -7145,4 +7194,764 @@ fn test_partial_claim_one_unit_then_remaining_transfer_failure_is_atomic() {
     client.claim(&stream_id, &recipient, &999);
     assert_eq!(token_client.balance(&recipient), 1000);
     assert_eq!(client.get_stream(&stream_id).claimed_amount, 1000);
+}
+
+// =============================================================================
+// #1129 — Specify edge behavior for Claimable calculation
+//
+// Each test targets exactly one boundary documented in the `claimable()` and
+// `vested_amount()` doc-comments: before start, at exact start, one second
+// before end, at exact end, after end, canceled-at-time (before and after the
+// original end), and integer rounding / dust across repeated partial claims.
+// =============================================================================
+
+/// Before stream start: claimable is always 0, and a claim attempt fails
+/// atomically without touching balances or emitting any events.
+#[test]
+fn test_claimable_edge_before_start_is_zero_and_atomic_rollback() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+    let token_client = token::Client::new(&env, &token);
+
+    token_admin.mint(&sender, &1_000);
+
+    // Stream runs from t=100 to t=200
+    env.ledger().with_mut(|l| l.timestamp = 0);
+    let stream_id =
+        client.create_stream(&sender, &recipient, &token, &1_000, &100, &200, &0, &None);
+
+    // Claimable is 0 at every point before start
+    assert_eq!(client.claimable(&stream_id, &0), 0);
+    assert_eq!(client.claimable(&stream_id, &50), 0);
+    assert_eq!(client.claimable(&stream_id, &99), 0);
+
+    let events_before = env.events().all().len();
+    // A claim attempt fails; nothing changes
+    env.ledger().with_mut(|l| l.timestamp = 50);
+    assert!(client.try_claim(&stream_id, &recipient, &1).is_err());
+    assert_eq!(env.events().all().len(), events_before);
+    assert_eq!(token_client.balance(&recipient), 0);
+    assert_eq!(token_client.balance(&contract_id), 1_000);
+    assert_eq!(client.get_stream(&stream_id).claimed_amount, 0);
+}
+
+/// At exact start time: claimable is 0 (zero elapsed) and a claim fails
+/// without any side effect.
+#[test]
+fn test_claimable_edge_at_exact_start_time_is_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+    let token_client = token::Client::new(&env, &token);
+
+    token_admin.mint(&sender, &1_000);
+    let stream_id = client.create_stream(
+        &sender, &recipient, &token, &1_000, &1_000, &2_000, &0, &None,
+    );
+
+    assert_eq!(client.claimable(&stream_id, &1_000), 0);
+
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    assert!(client.try_claim(&stream_id, &recipient, &1).is_err());
+    assert_eq!(token_client.balance(&recipient), 0);
+    assert_eq!(client.get_stream(&stream_id).claimed_amount, 0);
+}
+
+/// One second before end time: claimable is `total - 1` (floor rounding) for
+/// a stream of `total_amount == duration`.
+#[test]
+fn test_claimable_edge_one_second_before_end() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+
+    // 1000 tokens over 1000 seconds: 1 token per second, exactly.
+    token_admin.mint(&sender, &1_000);
+    let stream_id =
+        client.create_stream(&sender, &recipient, &token, &1_000, &0, &1_000, &0, &None);
+
+    // At t=999: 999 tokens vested, 999 claimable
+    assert_eq!(client.claimable(&stream_id, &999), 999);
+}
+
+/// At exact end time: the full total_amount is claimable.
+#[test]
+fn test_claimable_edge_at_exact_end_time_is_total() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+
+    token_admin.mint(&sender, &1_000);
+    let stream_id = client.create_stream(
+        &sender, &recipient, &token, &1_000, &1_000, &2_000, &0, &None,
+    );
+
+    assert_eq!(client.claimable(&stream_id, &2_000), 1_000);
+}
+
+/// After end time: claimable stays capped at total_amount; repeated queries
+/// return the same value and do not increase beyond the cap.
+#[test]
+fn test_claimable_edge_after_end_time_capped_at_total() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+
+    token_admin.mint(&sender, &1_000);
+    let stream_id = client.create_stream(
+        &sender, &recipient, &token, &1_000, &1_000, &2_000, &0, &None,
+    );
+
+    // All times beyond end_time should return the same capped value
+    assert_eq!(client.claimable(&stream_id, &2_001), 1_000);
+    assert_eq!(client.claimable(&stream_id, &5_000), 1_000);
+    assert_eq!(client.claimable(&stream_id, &(u64::MAX / 2)), 1_000);
+}
+
+/// Canceled-at-time: after cancel() the claimable amount is frozen at the
+/// vested amount on the cancel ledger; queries beyond the original end_time
+/// also return the frozen amount (not total_amount).
+#[test]
+fn test_claimable_edge_canceled_at_midpoint_frozen_beyond_original_end() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+    let token_client = token::Client::new(&env, &token);
+
+    token_admin.mint(&sender, &1_000);
+    // Stream: t=0 to t=1000, 1000 tokens
+    let stream_id =
+        client.create_stream(&sender, &recipient, &token, &1_000, &0, &1_000, &0, &None);
+
+    // Cancel at t=400 (vested = 400, refund = 600)
+    env.ledger().with_mut(|l| l.timestamp = 400);
+    client.cancel(&stream_id, &sender);
+
+    let stream = client.get_stream(&stream_id);
+    assert!(stream.canceled);
+    assert_eq!(stream.end_time, 400);
+    assert_eq!(stream.total_amount, 400);
+    assert_eq!(token_client.balance(&sender), 600); // 600 refunded
+
+    // Claimable is frozen at 400 regardless of how far beyond the original end_time we query
+    assert_eq!(client.claimable(&stream_id, &400), 400);
+    assert_eq!(client.claimable(&stream_id, &700), 400);
+    assert_eq!(client.claimable(&stream_id, &1_000), 400); // original end_time
+    assert_eq!(client.claimable(&stream_id, &9_999), 400); // well beyond
+
+    // Recipient can claim exactly 400 and then nothing more
+    assert_eq!(client.claim(&stream_id, &recipient, &400), 400);
+    assert_eq!(client.claimable(&stream_id, &9_999), 0);
+    assert_eq!(token_client.balance(&recipient), 400);
+    assert_eq!(token_client.balance(&contract_id), 0);
+}
+
+/// Canceled before start: claimable is always 0 for all future times; a claim
+/// attempt fails atomically.
+#[test]
+fn test_claimable_edge_canceled_before_start_is_zero_for_all_times() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+    let token_client = token::Client::new(&env, &token);
+
+    token_admin.mint(&sender, &1_000);
+    let stream_id =
+        client.create_stream(&sender, &recipient, &token, &1_000, &500, &1_500, &0, &None);
+
+    env.ledger().with_mut(|l| l.timestamp = 0);
+    client.cancel(&stream_id, &sender);
+
+    // Full refund, nothing for recipient
+    assert_eq!(token_client.balance(&sender), 1_000);
+
+    assert_eq!(client.claimable(&stream_id, &0), 0);
+    assert_eq!(client.claimable(&stream_id, &500), 0);
+    assert_eq!(client.claimable(&stream_id, &1_000), 0);
+    assert_eq!(client.claimable(&stream_id, &9_999), 0);
+
+    env.ledger().with_mut(|l| l.timestamp = 2_000);
+    assert!(client.try_claim(&stream_id, &recipient, &1).is_err());
+    assert_eq!(token_client.balance(&recipient), 0);
+    assert_eq!(token_client.balance(&contract_id), 0);
+}
+
+/// Integer rounding (dust): with a non-divisible stream, repeated partial
+/// claims at regular intervals produce floor-rounded amounts.  The final claim
+/// recovers all accumulated dust so the total paid exactly equals total_amount.
+#[test]
+fn test_claimable_edge_rounding_dust_recovered_at_end() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+    let token_client = token::Client::new(&env, &token);
+
+    // 100 tokens over 30 seconds: 100/30 = 3.33… tokens/s; integer division truncates.
+    token_admin.mint(&sender, &100);
+    let stream_id = client.create_stream(&sender, &recipient, &token, &100, &0, &30, &0, &None);
+
+    // t=10: vested = 100*10/30 = 33 (floor)
+    assert_eq!(client.claimable(&stream_id, &10), 33);
+    env.ledger().with_mut(|l| l.timestamp = 10);
+    client.claim(&stream_id, &recipient, &33);
+
+    // t=20: vested = 100*20/30 = 66 (floor); 66-33 = 33 claimable
+    assert_eq!(client.claimable(&stream_id, &20), 33);
+    env.ledger().with_mut(|l| l.timestamp = 20);
+    client.claim(&stream_id, &recipient, &33);
+
+    // t=30 (end): vested = 100; 100 - 66 = 34 claimable (recovering 2 truncated units)
+    assert_eq!(client.claimable(&stream_id, &30), 34);
+    env.ledger().with_mut(|l| l.timestamp = 30);
+    client.claim(&stream_id, &recipient, &34);
+
+    // All 100 tokens paid out; nothing left
+    assert_eq!(client.claimable(&stream_id, &30), 0);
+    assert_eq!(token_client.balance(&recipient), 100);
+    assert_eq!(token_client.balance(&contract_id), 0);
+}
+
+/// Checked arithmetic: a claim that would make claimed_amount exceed
+/// total_amount is rejected without any balance or state change.
+#[test]
+fn test_claimable_edge_checked_sub_never_returns_negative() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+    let token_client = token::Client::new(&env, &token);
+
+    token_admin.mint(&sender, &1_000);
+    let stream_id =
+        client.create_stream(&sender, &recipient, &token, &1_000, &0, &1_000, &0, &None);
+
+    // Claim the full vested amount at t=1000
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.claim(&stream_id, &recipient, &1_000);
+
+    // claimable must be 0 (checked_sub saturates rather than going negative)
+    assert_eq!(client.claimable(&stream_id, &1_000), 0);
+    assert_eq!(client.claimable(&stream_id, &9_999), 0);
+
+    // Attempting a second claim panics as expected
+    assert!(client.try_claim(&stream_id, &recipient, &1).is_err());
+    assert_eq!(token_client.balance(&recipient), 1_000);
+    assert_eq!(token_client.balance(&contract_id), 0);
+}
+
+/// get_claimable_batch applies the same edge rules: before start, after end,
+/// and canceled streams all return the correct capped value.
+#[test]
+fn test_claimable_batch_edge_boundary_coverage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_token(&env, &admin);
+    let token_admin = token::StellarAssetClient::new(&env, &token);
+
+    token_admin.mint(&sender, &3_000);
+
+    // Stream A: not yet started (t < start_time)
+    let id_a = client.create_stream(&sender, &recipient, &token, &1_000, &500, &1_500, &0, &None);
+    // Stream B: in progress at t=800
+    let id_b = client.create_stream(&sender, &recipient, &token, &1_000, &0, &1_000, &0, &None);
+    // Stream C: canceled before start
+    let id_c = client.create_stream(&sender, &recipient, &token, &1_000, &200, &1_200, &0, &None);
+    client.cancel(&id_c, &sender); // t=0, 0 vested
+
+    let mut ids = soroban_sdk::vec![&env];
+    ids.push_back(id_a);
+    ids.push_back(id_b);
+    ids.push_back(id_c);
+
+    // At t=800:
+    //   id_a: start=500 already past but let's check: 800 elapsed from 500 → 300/1000 * 1000 = 300
+    //   id_b: elapsed=800/1000 * 1000 = 800
+    //   id_c: canceled, total_amount reduced to 0 → 0
+    let result = client.get_claimable_batch(&ids, &800);
+    assert_eq!(result.get(id_a).unwrap(), 300);
+    assert_eq!(result.get(id_b).unwrap(), 800);
+    assert_eq!(result.get(id_c).unwrap(), 0);
+
+    // Unknown stream ID returns 0
+    let mut ids_with_unknown = soroban_sdk::vec![&env];
+    ids_with_unknown.push_back(9_999_u64);
+    let result_unknown = client.get_claimable_batch(&ids_with_unknown, &800);
+    assert_eq!(result_unknown.get(9_999).unwrap(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Regression tests: claimable calculation (#1133) and partial claims (#1138)
+// ---------------------------------------------------------------------------
+
+struct RegFixture<'a> {
+    env: &'a Env,
+    client: StellarStreamContractClient<'a>,
+    token: token::Client<'a>,
+    contract_id: Address,
+    sender: Address,
+    recipient: Address,
+    stream_id: u64,
+}
+
+fn reg_fixture<'a>(env: &'a Env, total: i128, start: u64, end: u64) -> RegFixture<'a> {
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, StellarStreamContract);
+    let client = StellarStreamContractClient::new(env, &contract_id);
+    let admin = Address::generate(env);
+    let sender = Address::generate(env);
+    let recipient = Address::generate(env);
+    let token_addr = create_token(env, &admin);
+    token::StellarAssetClient::new(env, &token_addr).mint(&sender, &total);
+    let stream_id = client.create_stream(
+        &sender,
+        &recipient,
+        &token_addr,
+        &total,
+        &start,
+        &end,
+        &0,
+        &None,
+    );
+    let token = token::Client::new(env, &token_addr);
+    // The stream escrows the full amount inside the contract.
+    assert_eq!(token.balance(&contract_id), total);
+    RegFixture {
+        env,
+        client,
+        token,
+        contract_id,
+        sender,
+        recipient,
+        stream_id,
+    }
+}
+
+impl<'a> RegFixture<'a> {
+    fn set_time(&self, ts: u64) {
+        self.env.ledger().with_mut(|l| l.timestamp = ts);
+    }
+
+    fn stream(&self) -> Stream {
+        self.client.get_stream(&self.stream_id)
+    }
+
+    /// Signs `claim(stream_id, recipient, amount)` as `signer`, and nothing else.
+    fn sign_claim(&self, signer: &Address, amount: i128) {
+        self.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: signer,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &self.contract_id,
+                fn_name: "claim",
+                args: (self.stream_id, self.recipient.clone(), amount).into_val(self.env),
+                sub_invokes: &[],
+            },
+        }]);
+    }
+
+    /// (topic[1], payload) of every event published by the stream contract itself.
+    fn contract_events(&self) -> std::vec::Vec<(Symbol, Val)> {
+        let mut out = std::vec::Vec::new();
+        for (addr, topics, data) in self.env.events().all().iter() {
+            if addr != self.contract_id {
+                continue;
+            }
+            if let Some(kind) = topics.get(1) {
+                let kind: Symbol = kind.into_val(self.env);
+                out.push((kind, data));
+            }
+        }
+        out
+    }
+
+    fn count_events(&self, kind: Symbol) -> usize {
+        self.contract_events()
+            .iter()
+            .filter(|(k, _)| *k == kind)
+            .count()
+    }
+
+    /// Payload of the most recent contract event of this kind.
+    fn last_event(&self, kind: Symbol) -> Val {
+        self.contract_events()
+            .into_iter()
+            .rev()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, data)| data)
+            .expect("no event of that kind")
+    }
+
+    fn last_two_kinds(&self) -> (Symbol, Symbol) {
+        let events = self.contract_events();
+        let n = events.len();
+        (events[n - 2].0.clone(), events[n - 1].0.clone())
+    }
+}
+
+#[test]
+fn test_1133_claimable_before_start_is_zero_and_claim_reverts() {
+    let env = Env::default();
+    let f = reg_fixture(&env, 1_000, 1_000, 2_000);
+    let last_claim_before = f.stream().last_claim_time;
+    f.set_time(500);
+
+    assert_eq!(f.client.claimable(&f.stream_id, &500), 0);
+    assert_eq!(f.client.claimable(&f.stream_id, &999), 0);
+    assert_eq!(f.client.claimable(&f.stream_id, &1_000), 0);
+
+    // A claim before the start reverts and leaves everything untouched.
+    assert!(f.client.try_claim(&f.stream_id, &f.recipient, &1).is_err());
+    let stream = f.stream();
+    assert_eq!(stream.claimed_amount, 0);
+    assert_eq!(stream.last_claim_time, last_claim_before);
+    assert_eq!(f.token.balance(&f.recipient), 0);
+    assert_eq!(f.token.balance(&f.contract_id), 1_000);
+    assert_eq!(f.count_events(symbol_short!("Claimed")), 0);
+
+    // The first unit vests one second after the start.
+    assert_eq!(f.client.claimable(&f.stream_id, &1_001), 1);
+}
+
+#[test]
+fn test_1133_claimable_at_end_pays_full_amount_and_completes() {
+    let env = Env::default();
+    // 1_000_003 over 1_000s is not a multiple of the duration, so rounding matters.
+    let total: i128 = 1_000_003;
+    let f = reg_fixture(&env, total, 1_000, 2_000);
+
+    // One second before the end the floor still holds back the last units.
+    assert_eq!(f.client.claimable(&f.stream_id, &1_999), 999_002);
+    assert_eq!(f.client.claimable(&f.stream_id, &2_000), total);
+    assert_eq!(f.client.claimable(&f.stream_id, &9_999), total);
+
+    f.set_time(2_000);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &total), total);
+
+    assert_eq!(f.token.balance(&f.recipient), total);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+    let stream = f.stream();
+    assert_eq!(stream.claimed_amount, total);
+    assert_eq!(stream.last_claim_time, 2_000);
+
+    let claimed: StreamClaimed = f.last_event(symbol_short!("Claimed")).into_val(f.env);
+    assert_eq!(claimed.amount, total);
+    assert_eq!(claimed.claimed_amount, total);
+    let completed: StreamCompleted = f.last_event(symbol_short!("Completed")).into_val(f.env);
+    assert_eq!(completed.stream_id, f.stream_id);
+    assert_eq!(completed.total_amount, total);
+    assert_eq!(completed.timestamp, 2_000);
+    assert_eq!(
+        f.last_two_kinds(),
+        (symbol_short!("Claimed"), symbol_short!("Completed"))
+    );
+
+    // Nothing is left, and an extra claim reverts.
+    assert_eq!(f.client.claimable(&f.stream_id, &9_999), 0);
+    assert!(f.client.try_claim(&f.stream_id, &f.recipient, &1).is_err());
+    assert_eq!(f.token.balance(&f.recipient), total);
+}
+
+#[test]
+fn test_1133_repeated_partial_claims_floor_without_dust_loss() {
+    let env = Env::default();
+    // 1_000 over 3_000s: each third vests 333.33.., so every step rounds down.
+    let f = reg_fixture(&env, 1_000, 1_000, 4_000);
+
+    // t=2_000: floor(1_000 * 1_000 / 3_000) = 333
+    f.set_time(2_000);
+    assert_eq!(f.client.claimable(&f.stream_id, &2_000), 333);
+    // One more than claimable reverts and changes nothing.
+    assert!(f
+        .client
+        .try_claim(&f.stream_id, &f.recipient, &334)
+        .is_err());
+    assert_eq!(f.stream().claimed_amount, 0);
+    assert_eq!(f.token.balance(&f.recipient), 0);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &333), 333);
+    assert_eq!(f.token.balance(&f.recipient), 333);
+    assert_eq!(f.token.balance(&f.contract_id), 667);
+    let e1: StreamClaimed = f.last_event(symbol_short!("Claimed")).into_val(f.env);
+    assert_eq!((e1.amount, e1.claimed_amount), (333, 333));
+    assert_eq!(f.client.claimable(&f.stream_id, &2_000), 0);
+
+    // t=3_000: floor(1_000 * 2_000 / 3_000) = 666 vested, 333 already claimed.
+    f.set_time(3_000);
+    assert_eq!(f.client.claimable(&f.stream_id, &3_000), 333);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &333), 333);
+    assert_eq!(f.token.balance(&f.recipient), 666);
+    assert_eq!(f.token.balance(&f.contract_id), 334);
+    let e2: StreamClaimed = f.last_event(symbol_short!("Claimed")).into_val(f.env);
+    assert_eq!((e2.amount, e2.claimed_amount), (333, 666));
+    assert_eq!(f.stream().last_claim_time, 3_000);
+    assert_eq!(f.count_events(symbol_short!("Completed")), 0);
+
+    // t=4_000: everything has vested. The last claim is 334, not 333, because
+    // the rounded-down remainders land in it, so no dust is lost or overpaid.
+    f.set_time(4_000);
+    assert_eq!(f.client.claimable(&f.stream_id, &4_000), 334);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &334), 334);
+    assert_eq!(f.token.balance(&f.recipient), 1_000);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+    assert_eq!(f.stream().claimed_amount, 1_000);
+    assert_eq!(f.count_events(symbol_short!("Completed")), 1);
+}
+
+#[test]
+fn test_1133_cancel_at_time_clamps_claimable_and_splits_funds() {
+    let env = Env::default();
+    let f = reg_fixture(&env, 1_000, 1_000, 4_000);
+
+    // The recipient takes 100 early.
+    f.set_time(2_000);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &100), 100);
+
+    // Sender cancels at t=3_000: floor(1_000 * 2_000 / 3_000) = 666 vested, 334 refunded.
+    f.set_time(3_000);
+    f.client.cancel(&f.stream_id, &f.sender);
+
+    let stream = f.stream();
+    assert!(stream.canceled);
+    assert_eq!(stream.total_amount, 666);
+    assert_eq!(stream.end_time, 3_000);
+    assert_eq!(stream.claimed_amount, 100);
+    assert_eq!(f.token.balance(&f.sender), 334);
+    assert_eq!(f.token.balance(&f.recipient), 100);
+    assert_eq!(f.token.balance(&f.contract_id), 566);
+
+    let canceled: StreamCanceled = f.last_event(symbol_short!("Canceled")).into_val(f.env);
+    assert_eq!(canceled.stream_id, f.stream_id);
+    assert_eq!(canceled.sender, f.sender);
+    assert_eq!(canceled.refunded_amount, 334);
+    assert_eq!(canceled.timestamp, 3_000);
+
+    // Claimable is clamped to what had vested at the cancel, now and later.
+    assert_eq!(f.client.claimable(&f.stream_id, &3_000), 566);
+    assert_eq!(f.client.claimable(&f.stream_id, &9_999), 566);
+
+    // The recipient cannot take more than that, and a second cancel is a no-op.
+    f.set_time(9_999);
+    assert!(f
+        .client
+        .try_claim(&f.stream_id, &f.recipient, &567)
+        .is_err());
+    assert_eq!(f.token.balance(&f.recipient), 100);
+    f.client.cancel(&f.stream_id, &f.sender);
+    assert_eq!(f.token.balance(&f.sender), 334);
+
+    // The recipient collects the rest and the escrow ends up empty.
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &566), 566);
+    assert_eq!(f.token.balance(&f.recipient), 666);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+    assert_eq!(
+        f.token.balance(&f.sender) + f.token.balance(&f.recipient),
+        1_000
+    );
+}
+
+#[test]
+fn test_1133_claim_requires_recipient_authorization() {
+    let env = Env::default();
+    let f = reg_fixture(&env, 1_000, 1_000, 2_000);
+    f.set_time(1_500); // 500 vested
+
+    // No signature: rejected.
+    env.mock_auths(&[]);
+    assert!(f
+        .client
+        .try_claim(&f.stream_id, &f.recipient, &100)
+        .is_err());
+
+    // Someone else signs on the recipient's behalf: rejected.
+    let attacker = Address::generate(&env);
+    f.sign_claim(&attacker, 100);
+    assert!(f
+        .client
+        .try_claim(&f.stream_id, &f.recipient, &100)
+        .is_err());
+
+    // Rollback: nothing moved, nothing emitted.
+    assert_eq!(f.stream().claimed_amount, 0);
+    assert_eq!(f.token.balance(&f.recipient), 0);
+    assert_eq!(f.token.balance(&f.contract_id), 1_000);
+    assert_eq!(f.count_events(symbol_short!("Claimed")), 0);
+
+    // The recipient signs: paid exactly the requested amount.
+    f.sign_claim(&f.recipient, 100);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &100), 100);
+    assert_eq!(f.token.balance(&f.recipient), 100);
+    assert_eq!(f.token.balance(&f.contract_id), 900);
+    assert_eq!(f.stream().claimed_amount, 100);
+}
+
+#[test]
+fn test_1138_one_unit_claim_then_remaining_claim() {
+    let env = Env::default();
+    let f = reg_fixture(&env, 1_000, 1_000, 2_000);
+
+    // t=1_500: 500 of 1_000 have vested.
+    f.set_time(1_500);
+    assert_eq!(f.client.claimable(&f.stream_id, &1_500), 500);
+
+    // One-unit claim: the recipient authorizes and is paid exactly 1.
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &1), 1);
+    assert!(env.auths().iter().any(|(who, _)| *who == f.recipient));
+    let stream = f.stream();
+    assert_eq!(stream.claimed_amount, 1);
+    assert_eq!(stream.last_claim_time, 1_500);
+    assert_eq!(f.token.balance(&f.recipient), 1);
+    assert_eq!(f.token.balance(&f.contract_id), 999);
+    let first: StreamClaimed = f.last_event(symbol_short!("Claimed")).into_val(f.env);
+    assert_eq!(first.stream_id, f.stream_id);
+    assert_eq!(first.actor, f.recipient);
+    assert_eq!(first.recipient, f.recipient);
+    assert_eq!(first.amount, 1);
+    assert_eq!(first.claimed_amount, 1);
+    assert_eq!(first.timestamp, 1_500);
+    assert_eq!(f.count_events(symbol_short!("Completed")), 0);
+
+    // 499 is left at this instant; asking for 500 reverts and changes nothing.
+    assert_eq!(f.client.claimable(&f.stream_id, &1_500), 499);
+    assert!(f
+        .client
+        .try_claim(&f.stream_id, &f.recipient, &500)
+        .is_err());
+    assert_eq!(f.stream().claimed_amount, 1);
+    assert_eq!(f.token.balance(&f.recipient), 1);
+    assert_eq!(f.token.balance(&f.contract_id), 999);
+
+    // Remaining claim.
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &499), 499);
+    assert_eq!(f.token.balance(&f.recipient), 500);
+    assert_eq!(f.token.balance(&f.contract_id), 500);
+    let second: StreamClaimed = f.last_event(symbol_short!("Claimed")).into_val(f.env);
+    assert_eq!(second.amount, 499);
+    assert_eq!(second.claimed_amount, 500);
+    assert_eq!(f.client.claimable(&f.stream_id, &1_500), 0);
+
+    // At the end the rest vests; claiming it completes the stream.
+    f.set_time(2_000);
+    assert_eq!(f.client.claimable(&f.stream_id, &2_000), 500);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &500), 500);
+    assert_eq!(f.token.balance(&f.recipient), 1_000);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+    let done: StreamCompleted = f.last_event(symbol_short!("Completed")).into_val(f.env);
+    assert_eq!(done.total_amount, 1_000);
+    assert_eq!(done.actor, f.recipient);
+    assert_eq!(done.timestamp, 2_000);
+    assert_eq!(
+        f.last_two_kinds(),
+        (symbol_short!("Claimed"), symbol_short!("Completed"))
+    );
+}
+
+#[test]
+fn test_1138_transfer_failure_after_authorization_rolls_back() {
+    let env = Env::default();
+    let f = reg_fixture(&env, 1_000, 1_000, 2_000);
+
+    // One-unit claim goes through at t=1_200.
+    f.set_time(1_200);
+    f.sign_claim(&f.recipient, 1);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &1), 1);
+    assert_eq!(f.token.balance(&f.recipient), 1);
+
+    // Drain the escrow so the next payout transfer fails.
+    env.mock_all_auths();
+    let sink = Address::generate(&env);
+    env.as_contract(&f.contract_id, || {
+        f.token.transfer(&f.contract_id, &sink, &999);
+    });
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+
+    // t=1_500: 499 is claimable and the recipient signs, but the transfer fails.
+    f.set_time(1_500);
+    assert_eq!(f.client.claimable(&f.stream_id, &1_500), 499);
+    f.sign_claim(&f.recipient, 499);
+    assert!(f
+        .client
+        .try_claim(&f.stream_id, &f.recipient, &499)
+        .is_err());
+
+    // Rollback: stream state, balances and events are exactly as before.
+    let stream = f.stream();
+    assert_eq!(stream.claimed_amount, 1);
+    assert_eq!(stream.last_claim_time, 1_200);
+    assert_eq!(f.token.balance(&f.recipient), 1);
+    assert_eq!(f.token.balance(&f.contract_id), 0);
+    assert_eq!(f.count_events(symbol_short!("Claimed")), 1);
+    assert_eq!(f.count_events(symbol_short!("Completed")), 0);
+    assert_eq!(f.client.claimable(&f.stream_id, &1_500), 499);
+
+    // Refill the escrow: the same signed claim now succeeds, so the failure
+    // was the transfer and not authorization or validation.
+    env.mock_all_auths();
+    token::StellarAssetClient::new(&env, &f.token.address).mint(&f.contract_id, &999);
+    f.sign_claim(&f.recipient, 499);
+    assert_eq!(f.client.claim(&f.stream_id, &f.recipient, &499), 499);
+    let stream = f.stream();
+    assert_eq!(stream.claimed_amount, 500);
+    assert_eq!(stream.last_claim_time, 1_500);
+    assert_eq!(f.token.balance(&f.recipient), 500);
+    assert_eq!(f.token.balance(&f.contract_id), 500);
+    let ev: StreamClaimed = f.last_event(symbol_short!("Claimed")).into_val(f.env);
+    assert_eq!(ev.amount, 499);
+    assert_eq!(ev.claimed_amount, 500);
 }

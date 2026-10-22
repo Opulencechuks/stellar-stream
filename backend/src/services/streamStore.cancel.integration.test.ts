@@ -6,6 +6,7 @@ import { initDb, getDb } from "./db";
 import { initCache } from "./cache";
 import { getStreamHistory } from "./eventHistory";
 import { getJwtSecret } from "./auth";
+import { cancelStream, pauseStream } from "./streamStore";
 import path from "path";
 import fs from "fs";
 
@@ -245,6 +246,104 @@ describe("POST /api/streams/:id/cancel Integration Tests", () => {
   });
 
   describe("Event history verification", () => {
+    it("returns a stable error and rolls back the stream update when event insertion fails", async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const stream = {
+        id: "rollback-event-write",
+        sender: mockSender,
+        recipient: mockRecipient,
+        asset_code: "USDC",
+        total_amount: 1000,
+        duration_seconds: 3600,
+        start_at: now - 1800,
+        created_at: now - 3600,
+      };
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO streams (id, sender, recipient, asset_code, total_amount, duration_seconds, start_at, created_at)
+        VALUES (@id, @sender, @recipient, @asset_code, @total_amount, @duration_seconds, @start_at, @created_at)
+      `).run(stream);
+      db.exec(`
+        CREATE TRIGGER fail_canceled_event
+        BEFORE INSERT ON stream_events
+        WHEN NEW.stream_id = '${stream.id}' AND NEW.event_type = 'canceled'
+        BEGIN
+          SELECT RAISE(ABORT, 'forced event insert failure');
+        END;
+      `);
+
+      try {
+        const response = await request(app)
+          .post(`/api/streams/${stream.id}/cancel`)
+          .set("Authorization", `Bearer ${authToken}`);
+
+        expect(response.status).toBe(500);
+        expect(response.body).toMatchObject({
+          error: "Failed to persist stream and event.",
+          code: "STREAM_WRITE_FAILED",
+        });
+        expect(
+          db.prepare("SELECT canceled_at FROM streams WHERE id = ?").get(stream.id)
+            .canceled_at,
+        ).toBeNull();
+        expect(getStreamHistory(stream.id)).toHaveLength(0);
+      } finally {
+        db.exec("DROP TRIGGER IF EXISTS fail_canceled_event");
+      }
+    });
+
+    it("preserves both updates and history when two writers update the same stream", async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const stream = {
+        id: "concurrent-stream-writes",
+        sender: mockSender,
+        recipient: mockRecipient,
+        asset_code: "USDC",
+        total_amount: 1000,
+        duration_seconds: 3600,
+        start_at: now - 1800,
+        created_at: now - 3600,
+      };
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO streams (id, sender, recipient, asset_code, total_amount, duration_seconds, start_at, created_at)
+        VALUES (@id, @sender, @recipient, @asset_code, @total_amount, @duration_seconds, @start_at, @created_at)
+      `).run(stream);
+
+      const previousSorobanDisabled = process.env.SOROBAN_DISABLED;
+      const previousContractId = process.env.CONTRACT_ID;
+      process.env.SOROBAN_DISABLED = "true";
+      delete process.env.CONTRACT_ID;
+      try {
+        const results = await Promise.all([
+          pauseStream(stream.id),
+          cancelStream(stream.id),
+        ]);
+
+        expect(results).toHaveLength(2);
+        const updated = db
+          .prepare("SELECT paused_at, canceled_at FROM streams WHERE id = ?")
+          .get(stream.id);
+        expect(updated.paused_at).not.toBeNull();
+        expect(updated.canceled_at).not.toBeNull();
+        expect(getStreamHistory(stream.id).map((event) => event.eventType).sort()).toEqual([
+          "canceled",
+          "paused",
+        ]);
+      } finally {
+        if (previousSorobanDisabled === undefined) {
+          delete process.env.SOROBAN_DISABLED;
+        } else {
+          process.env.SOROBAN_DISABLED = previousSorobanDisabled;
+        }
+        if (previousContractId === undefined) {
+          delete process.env.CONTRACT_ID;
+        } else {
+          process.env.CONTRACT_ID = previousContractId;
+        }
+      }
+    });
+
     it("should record canceled event only on first cancel attempt", async () => {
       const now = Math.floor(Date.now() / 1000);
       const stream = {

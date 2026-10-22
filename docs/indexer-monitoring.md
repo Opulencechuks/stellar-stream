@@ -195,10 +195,26 @@ The "Scenario B1" and "Scenario B2" suites exercise:
 | `CIRCUIT_BREAKER_TIMEOUT_MS` | 60000 | — | Time before OPEN → HALF_OPEN transition |
 | `INDEXER_FALLBACK_POLLING_ENABLED` | `false` | — | Switch between cursor-pagination and legacy fallback mode |
 | `INDEXER_FALLBACK_POLL_INTERVAL_MS` | 10000 | ≥ 1000 ms | Interval used when fallback mode is active |
-| `INDEXER_START_LEDGER` | — | integer | Override checkpoint on startup (useful for re-indexing) |
+| `INDEXER_START_LEDGER` | — | non-negative safe integer | Override in-memory starting ledger on startup for backfill; persisted checkpoint is updated only after a complete scan |
 
 The circuit-breaker failure threshold (5) and the half-open probe count (1) are
 hardcoded in the `CircuitBreaker` constructor in `indexer.ts`.
+
+---
+
+## Backfill workflow semantics (`runIndexerBackfill`)
+
+When backfilling from a configured `INDEXER_START_LEDGER` (or explicit `startLedger` option), `runIndexerBackfill()` evaluates the first page and pagination cycle with deterministic status codes and preserves the persisted `indexer_cursor` checkpoint whenever an input boundary, RPC truncation/delay, or RPC error occurs:
+
+| Condition | `statusCode` | `outcome` | `code` | Persisted Checkpoint (`indexer_cursor`) |
+|---|---:|---|---|---|
+| Complete scan across all pages | `200` | `success` | `OK` | Advanced to `max(latestLedger, maxLedgerSeen)` |
+| `latestLedger <= startLedger` (no new ledgers) | `200` | `success` | `NO_NEW_LEDGERS` | Unchanged |
+| RPC truncates or delays a page (empty first page with cursor, or repeating cursor) | `200` | `transient_delay` | `TRUNCATED_PAGE` | Unchanged |
+| Malformed or negative `startLedger` / `INDEXER_START_LEDGER` | `400` | `invalid_start_ledger` | `INVALID_START_LEDGER` | Unchanged |
+| RPC rate limit (`429`) on first or subsequent page | `429` | `rpc_error` | `RATE_LIMITED` | Unchanged |
+| RPC provider error (`5xx` / invalid response) | `502` | `rpc_error` | `PROVIDER_ERROR` / `RPC_ERROR` | Unchanged |
+| RPC disconnection / timeout or circuit `OPEN` / unconfigured | `503` | `rpc_error` / `circuit_open` / `unconfigured` | `DISCONNECTED` / `CIRCUIT_OPEN` / `UNCONFIGURED` | Unchanged |
 
 ---
 
